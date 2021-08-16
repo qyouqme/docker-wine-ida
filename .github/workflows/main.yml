@@ -1,0 +1,114 @@
+name: CI to Docker Hub 
+
+on:
+  push:
+    #tags:
+    #  - "*"
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        name: Checkout
+        uses: actions/checkout@v2
+      -       
+        name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+      -     
+        name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      - 
+        uses: docker/login-action@v1 
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      -
+        name: Install Rclone
+        env:
+          RCLONE_SERVACCOUNT: ${{ secrets.RCLONE_SERVACCOUNT }}
+        run: |
+            curl https://rclone.org/install.sh | sudo bash
+            mkdir -p ~/.config/rclone
+            cat << CONF > ~/.config/rclone/rclone.conf
+            [gd-priv]
+            type = drive
+            scope = drive
+            service_account_file = /tmp/rclone-servaccount.json
+            team_drive = 0AF9_qbIBRhtrUk9PVA
+            root_folder_id = 
+            CONF
+            echo $RCLONE_SERVACCOUNT | base64 -d > /tmp/rclone-servaccount.json
+            rclone about -vv gd-priv:
+      #- name: Setup tmate session
+      #  uses: mxschmitt/action-tmate@v3
+      - 
+        name: Download IDA
+        run: |
+            rclone copy -vP gd-priv:ida-leak ida-leak
+            cd ida-leak
+            find . -name "*.zip" -exec sh -c 'zipname="{}"; mkdir ${zipname%.*}; unzip $zipname -d ${zipname%.*}' \;
+      
+      -
+        name: Build & Push IDA 7.6 SP1
+        id: docker_build_76sp1
+        uses: docker/build-push-action@v2
+        with:
+          allow: security.insecure
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          context: ./ida-leak/IDA-7.6.210427-fullpatch
+          file: ./Dockerfile
+          build-args: |
+            PYTHON_VER=3.9.6
+          tags: nyamisty/docker-wine-ida:7.6sp1
+      -
+        name: Image digest
+        run: echo ${{ steps.docker_build_76sp1.outputs.digest }}
+
+      -
+        name: Build & Push IDA 7.5 SP3
+        id: docker_build_75sp3
+        uses: docker/build-push-action@v2
+        with:
+          allow: security.insecure
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          context: ./ida-leak/IDA-7.5.201028-fullpatch
+          file: ./Dockerfile
+          build-args: |
+            PYTHON_VER=3.8.10
+          tags: nyamisty/docker-wine-ida:7.5sp3
+      -
+        name: Image digest
+        run: echo ${{ steps.docker_build_75sp3.outputs.digest }}
+
+      -
+        name: Build & Push IDA 7.0
+        id: docker_build_70
+        uses: docker/build-push-action@v2
+        with:
+          allow: security.insecure
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          context: ./ida-leak/IDA-7.0.170914-fullpatch
+          file: ./Dockerfile
+          build-args: |
+            PYTHON_VER=2.7.18
+            USE_IDAPYSWITCH=0
+          tags: nyamisty/docker-wine-ida:7.0
+      -
+        name: Image digest
+        run: echo ${{ steps.docker_build_70.outputs.digest }}
